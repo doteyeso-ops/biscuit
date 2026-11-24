@@ -38,9 +38,26 @@ unlock is somebody else's work, the voice endpoint is yours.
 
 Screen-record the dashboard plus an audio capture instead: the ring and the voice
 are the only things a camera adds. A 40-second capture of *button → question →
-answer → music → EQ change* tells the same story. If you want something fully synthetic, a single-page
-"simulation" -- animated transcript, ring, dashboard -- is about an hour's work;
-ask for it rather than shipping a half-built one.
+answer → music → EQ change* tells the same story.
+
+## The simulation (built)
+
+`demo/simulation.html` replays the whole interaction on one 1280x720 page: idle
+ring, button press, the question typing in, thinking, the spoken answer, music
+starting, a press cutting it, the dashboard with the EQ moving, and an end card.
+Open it in a browser and screen-record it.
+
+```bash
+# fullscreen, controls hidden, honest label kept
+open demo/simulation.html?record=1
+```
+
+- It is labelled **"simulated from recorded sessions"** in the corner and stays
+  that way: present it as a replay, never as live hardware.
+- Keep the window **visible** while recording. Browsers throttle timers in a
+  hidden or minimised tab, so the sequence will crawl if it is behind another
+  window.
+- 1280x720 scales itself to the window, so record at any size and crop to 16:9.
 
 ## Things that will ruin the take
 

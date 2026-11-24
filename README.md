@@ -81,6 +81,11 @@ Everything comes from the environment; nothing secret is stored in the repo.
 The dashboard writes `dot_config.json` (EQ, toggles) and `music_history.json`
 beside the controller. Both are gitignored.
 
+## See it without the hardware
+
+`demo/simulation.html` — a 60-second replay of the real interaction (labelled as
+a simulation): press, question, answer, music, dashboard. Open it in a browser.
+
 ## Status
 
 Working end to end on a Dot 2 running emOS: button turns, spoken answers, music,
