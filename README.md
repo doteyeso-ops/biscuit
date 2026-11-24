@@ -1,6 +1,6 @@
 # biscuit
 
-[![ci](https://github.com/doteyeso/biscuit/actions/workflows/ci.yml/badge.svg)](https://github.com/doteyeso/biscuit/actions/workflows/ci.yml)
+[![ci](https://github.com/doteyeso-ops/biscuit/actions/workflows/ci.yml/badge.svg)](https://github.com/doteyeso-ops/biscuit/actions/workflows/ci.yml)
 
 A self-hosted voice endpoint for a first-generation-rooted **Echo Dot 2 (2016)**.
 Press the button, ask a question, get an answer out of the same little speaker —
