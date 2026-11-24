@@ -1,0 +1,13 @@
+# Controller + web layer
+aiohttp>=3.9
+zeroconf>=0.132
+
+# Speech (local, no cloud account)
+faster-whisper>=1.0
+piper-tts>=1.2
+
+# Music (audio-only extraction; see docs/LEGAL.md before enabling)
+yt-dlp>=2024.1
+
+# Optional: snippets lane falls back to a provider you configure.
+# Nothing here requires an API key; the Google lane uses a browser you own.

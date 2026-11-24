@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Local state — settings, listening history, played music
+dot_config.json
+music_history.json
+controller.log
+*.log
+
+# Browser profile used by the Google lane (contains cookies: never commit)
+brave-*/
+*-profile/
+
+# Models and audio
+*.onnx
+*.onnx.json
+*.wav
+*.mp3
+*.webm
+
+# Secrets
+.env
+*.key
