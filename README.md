@@ -95,6 +95,37 @@ Most of the friction in this project came from assumptions, not code. So:
 - **Windows, macOS, Linux?** The controller is plain asyncio; the only
   OS-specific part is the `ffmpeg` path, which is an env var.
 
+## Try it without an Echo
+
+```bash
+python controller.py --simulate
+# then open http://127.0.0.1:8767/ui
+```
+
+`--simulate` attaches a fake device that speaks the real protocol: the dashboard
+is live, the ring visualiser renders, music resolves and streams, and the audio
+goes nowhere. It is there so you can see whether this is worth doing before you
+own a rooted Dot — and because a repo you can't run is a repo you don't trust.
+
+What it does not simulate: the button, the microphone, the speaker, and the
+device's output guard.
+
+## It listens on your network
+
+Port `8767` is bound on the LAN because the Dot has to reach it. That means the
+dashboard and the JSON API are reachable by anything on your network unless you
+set a token:
+
+```bash
+DOT_UI_TOKEN=$(python -c "import secrets;print(secrets.token_urlsafe(18))")
+```
+
+Then `/ui?t=<token>` works and everything else gets `401`. The device sockets
+(`/control`, `/data`, `/shell`) stay open — the device cannot send a header, and
+binding them to loopback would mean the Dot could not connect at all.
+
+Copy [`.env.example`](.env.example) for the full set of variables.
+
 ## Install
 
 ```bash

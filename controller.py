@@ -6,6 +6,7 @@ Advertises _emcontroller._tcp.local over mDNS exactly as the EchoMuse
 controller does: version=1, server=<name>, port 8767, no tls_port.
 """
 import asyncio
+import hmac
 import json
 import math
 import os
@@ -25,6 +26,7 @@ from zeroconf import ServiceInfo, IPVersion
 PORT = int(os.environ.get("DOT_PORT", "8767"))
 MDNS_NAME = "hermes"
 DEVICE_WS = None
+SIM = ("--simulate" in sys.argv) or os.environ.get("DOT_SIMULATE") == "1"
 DATA_WS = None
 SHELL_WS = None
 SHELL_READY = asyncio.Event()
@@ -191,6 +193,8 @@ async def amp_on():
     everything it is fed, so the analogue stage is the only place loudness can
     actually come from.
     """
+    if SIM:
+        return
     return await shell_run(
         'tinymix -D 0 "Ext_Speaker_Amp_Switch" On; '
         'tinymix -D 0 "PCM Playback Volume" 127 127; '
@@ -202,6 +206,7 @@ _SENT = re.compile(r"(?<=[.!?])\s+")
 
 MUSIC = {"task": None, "stop": None, "title": "", "query": ""}
 TURN_TASK = {"task": None}
+UI_TOKEN = os.environ.get("DOT_UI_TOKEN", "").strip()
 
 # ---------------------------------------------------------------------------
 # Ring visualiser
@@ -1594,9 +1599,55 @@ async def any_route(request):
 
     log(f"HTTP probe {request.method} {request.path} from {request.remote}")
     return web.Response(text="hermes controller\n", status=200)
+class _FakeDevice:
+    """A stand-in for the Dot that accepts the real protocol and no-ops it.
+
+    It exists so someone can clone this repo, run one command and see the
+    dashboard and the ring logic work without owning a rooted Echo.  It counts
+    what it was sent rather than pretending to play it."""
+
+    def __init__(self, name="sim"):
+        self.name = name
+        self.closed = False
+        self.frames = 0
+        self.bytes = 0
+        self.last = None
+
+    async def send_str(self, data):
+        self.frames += 1
+        self.last = data
+        if self.frames % 40 == 0:
+            log(f"sim/{self.name}: {self.frames} frames, {self.bytes} bytes of audio")
+
+    async def send_bytes(self, data):
+        self.bytes += len(data)
+
+
 async def main():
     ip = lan_ip()
-    app = web.Application()
+    @web.middleware
+    async def gate(request, handler):
+        """Optional shared-secret on the browser surface only.
+
+        The device sockets (/control, /data, /shell) stay open -- they are how
+        the Dot reaches us, and it cannot send a header.  Everything a human or
+        a curl can reach (the dashboard and the JSON API) is gated when
+        DOT_UI_TOKEN is set, because this port is bound on the LAN."""
+        if UI_TOKEN and request.path.startswith(("/ui", "/api", "/_")):
+            given = (request.query.get("t") or request.headers.get("X-Dot-Token", ""))
+            if not hmac.compare_digest(given, UI_TOKEN):
+                return web.Response(status=401,
+                                    text="DOT_UI_TOKEN required: open /ui?t=<token>")
+        return await handler(request)
+
+    app = web.Application(middlewares=[gate])
+
+    if SIM:
+        global DEVICE_WS, DATA_WS
+        DEVICE_WS = _FakeDevice("control")
+        DATA_WS = _FakeDevice("data")
+        log("SIMULATE: fake device attached — no Echo needed, nothing is played")
+        log("SIMULATE: the dashboard and ring logic are live; audio goes nowhere")
     app.router.add_route("*", "/{tail:.*}", any_route)
     runner = web.AppRunner(app)
     await runner.setup()
