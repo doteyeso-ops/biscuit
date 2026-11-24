@@ -42,14 +42,14 @@ answer → music → EQ change* tells the same story.
 
 ## The simulation (built)
 
-`demo/simulation.html` replays the whole interaction on one 1280x720 page: idle
+`docs/index.html` replays the whole interaction on one 1280x720 page: idle
 ring, button press, the question typing in, thinking, the spoken answer, music
 starting, a press cutting it, the dashboard with the EQ moving, and an end card.
 Open it in a browser and screen-record it.
 
 ```bash
 # fullscreen, controls hidden, honest label kept
-open demo/simulation.html?record=1
+open docs/index.html?record=1
 ```
 
 - It is labelled **"simulated from recorded sessions"** in the corner and stays

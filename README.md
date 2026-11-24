@@ -1,5 +1,7 @@
 # biscuit
 
+**▶ [Watch the 60-second demo](https://doteyeso-ops.github.io/biscuit/)** — it runs in the browser, no hardware needed.
+
 [![ci](https://github.com/doteyeso-ops/biscuit/actions/workflows/ci.yml/badge.svg)](https://github.com/doteyeso-ops/biscuit/actions/workflows/ci.yml)
 
 A self-hosted voice endpoint for a first-generation-rooted **Echo Dot 2 (2016)**.
@@ -170,7 +172,7 @@ beside the controller. Both are gitignored.
 
 ## See it without the hardware
 
-`demo/simulation.html` — a 60-second replay of the real interaction (labelled as
+`docs/index.html` — a 60-second replay of the real interaction (labelled as
 a simulation): press, question, answer, music, dashboard. Open it in a browser.
 
 ## Status
