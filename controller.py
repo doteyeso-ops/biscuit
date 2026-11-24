@@ -206,6 +206,7 @@ _SENT = re.compile(r"(?<=[.!?])\s+")
 
 MUSIC = {"task": None, "stop": None, "title": "", "query": "", "gen": 0}
 TURN_TASK = {"task": None}
+PLAYBACK = {"periods": 0, "bytes": 0}
 UI_TOKEN = os.environ.get("DOT_UI_TOKEN", "").strip()
 
 # ---------------------------------------------------------------------------
@@ -408,6 +409,14 @@ async def play_music(query, ws=None, gain_db=None, stale=None):
     if stale is not None and stale():
         log(f"music: dropped stale request ({query!r}) -- it was interrupted while resolving")
         return 0
+    # Flush *here*, after the resolve and after any chime, so the plane is clean
+    # immediately before the first frame rather than seconds earlier.
+    try:
+        await ctl({"type": "speaker_flush"})
+        await ctl({"type": "music_flush"})
+    except Exception:
+        pass
+    await asyncio.sleep(0.2)
     MUSIC["title"] = title
     MUSIC["query"] = query
     if HAVE_DASH:
@@ -426,6 +435,8 @@ async def play_music(query, ws=None, gain_db=None, stale=None):
     VIS.update({"on": True, "frame": 0, "peak": 1.0,
                 "pk": {"bass": 0.2, "mid": 0.2, "treble": 0.2}})
     log("ring: visualiser on")
+    PLAYBACK["periods"] = 0
+    PLAYBACK["bytes"] = 0
     clock = {"t": time.monotonic()}
     frames = 0
     prime = 3                     # ~128 ms up front; more than this is a level spike
@@ -448,6 +459,10 @@ async def play_music(query, ws=None, gain_db=None, stale=None):
                 log("music send failed:", e)
                 break
             frames += 1
+            # The device reports playback_stats only every ~10 s, so a check
+            # early in the stream is a false alarm; by ~12 s silence is real.
+            if frames == 300 and PLAYBACK["periods"] == 0:
+                log("music: device has accepted 12s of audio and reported no playback")
             await _visualise(chunk)
             if frames <= prime:
                 clock["t"] = max(clock["t"], time.monotonic())
@@ -491,19 +506,56 @@ def stop_music():
     return stopped
 
 
+async def quiesce_music():
+    """Cancel the current song and WAIT for its writer to be gone.
+
+    `task.cancel()` only schedules the cancellation; the task may still push
+    another period or two into the music plane. Opening the next stream inside
+    that window leaves the device holding a half-initialised queue -- it takes a
+    couple of periods, reports minDepth -1, and then goes silent. That is the
+    "says it is playing but never starts" case."""
+    t = MUSIC.get("task")
+    MUSIC["gen"] += 1
+    if MUSIC["stop"] is not None:
+        MUSIC["stop"].set()
+        MUSIC["stop"] = None
+    MUSIC["task"] = None
+    if t is not None and not t.done():
+        t.cancel()
+        try:
+            await asyncio.wait_for(t, 2.5)     # a resolve stuck in a thread is not worth waiting on
+        except asyncio.TimeoutError:
+            log("music: old task still finishing; moving on")
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            log("music task ended with", repr(e))
+    try:
+        await ctl({"type": "music_flush"})
+        await ctl({"type": "speaker_flush"})
+    except Exception:
+        pass
+    return t is not None
+
+
 async def start_music(query, gain_db=None):
     """Only ever one song: a new request replaces what is playing, with a flush
     and a soft cue so the switch is a transition rather than a hard cut into
     silence while yt-dlp resolves."""
-    if stop_music():
-        try:
-            await ctl({"type": "music_flush"})
-            await ctl({"type": "speaker_flush"})
-        except Exception:
-            pass
-        await asyncio.sleep(0.15)
+    if await quiesce_music():
+        await asyncio.sleep(0.35)      # let the device's own queue drain
         await cue("done")
         await asyncio.sleep(0.45)      # the chime is still buffered on the device
+    # Even with nothing playing, the plane can be left primed from a killed
+    # stream (a restart, a crash). Flushing first is what makes the difference
+    # between "starts playing" and "says it is playing and never does".
+    try:
+        await ctl({"type": "music_flush"})
+        await ctl({"type": "speaker_flush"})
+    except Exception:
+        pass
+    await asyncio.sleep(0.2)
+    PLAYBACK["periods"] = 0
     gen = MUSIC["gen"]
 
     async def guarded():
@@ -944,13 +996,8 @@ async def on_press():
     TURN_TASK["task"] = asyncio.current_task()
     # Music first: a press means "stop that and hear me". Cancel the stream,
     # flush the speaker buffer so the tail cannot bleed into the mic, then listen.
-    if stop_music():
+    if await quiesce_music():
         log("press: music stopped for the turn")
-        try:
-            await ctl({"type": "music_flush"})
-            await ctl({"type": "speaker_flush"})
-        except Exception:
-            pass
         # The flush stops the producer, not what the device has already queued:
         # several seconds of the song are still in its buffer. Opening the mic
         # immediately records the tail of the track, which Whisper turns into a
@@ -1321,6 +1368,13 @@ async def control(ws, req):
             elif t in ("stats",):
                 log("stats:", json.dumps(d)[:200])
             else:
+                if t == "playback_stats":
+                    st = d.get("stats") or d
+                    try:
+                        PLAYBACK["periods"] = int(st.get("periods", 0))
+                        PLAYBACK["bytes"] = int(st.get("bytesRecv", 0))
+                    except Exception:
+                        pass
                 log(f"{t}: {json.dumps(d)[:240]}")
     except Exception as e:
         log("control error:", e)
