@@ -91,6 +91,13 @@
   .track{height:5px;background:#1b2330;border-radius:3px;position:relative}
   .knob{position:absolute;top:-6px;width:17px;height:17px;border-radius:50%;
     background:var(--cyan);transition:left .5s cubic-bezier(.4,1.4,.5,1)}
+  .wheel{width:96px;height:96px;border-radius:50%;flex:0 0 auto;position:relative;
+    background:conic-gradient(from 0deg,#f33,#ff3,#3f3,#3ff,#33f,#f3f,#f33)}
+  .wheel:after{content:"";position:absolute;inset:20px;border-radius:50%;background:var(--panel)}
+  .chips{display:flex;flex-wrap:wrap;gap:6px}
+  .chip{background:#1b2330;color:#cfd9e8;border:1px solid #26313f;border-radius:999px;
+    padding:5px 10px;font-size:12px}
+  .chip.on{background:var(--cyan);color:#06202e;border-color:var(--cyan);font-weight:600}
   .hist{list-style:none;margin:0;padding:0}
   .hist li{display:flex;justify-content:space-between;padding:9px 0;
     border-bottom:1px solid #1a212b;font-size:14px;color:#c8d3e2}
@@ -147,6 +154,18 @@
         <div class="eqrow">Treble<div class="track"><div class="knob" id="kt" style="left:50%"></div></div><span id="vt">0 dB</span></div>
       </div>
       <div class="card">
+        <div class="t" style="font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim)">lighting</div>
+        <div style="display:flex;gap:16px;align-items:center;margin-top:12px">
+          <div class="wheel"></div>
+          <div class="chips">
+            <span class="chip on">equalizer</span><span class="chip">ocean</span>
+            <span class="chip">sunset</span><span class="chip">rainbow</span>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="grid" style="margin-top:22px">
+      <div class="card">
         <div class="t" style="font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim)">recently played</div>
         <ul class="hist">
           <li><span>Eine Kleine Nachtmusik — Mozart</span><span>just now</span></li>
@@ -188,6 +207,53 @@ const setRing = (color, glow = 0, ids = null) =>
     l.style.background = on ? color : OFF;
     l.style.boxShadow = on ? `0 0 ${14 + glow}px ${color}` : 'none';
   });
+
+/* three-band ring visualiser -- same mapping as the controller:
+   LEDs 0-3 bass, 4-7 mids, 8-11 treble, colours from the preset + hue. */
+const PRESET_HUES = {
+  equalizer: [28, 135, 192], ocean: [196, 176, 158], sunset: [8, 32, 350],
+  forest: [96, 130, 160], mono: null, rainbow: null, pulse: null
+};
+function hsv(h, sat = 1, val = 1) {
+  h = ((h % 360) + 360) % 360;
+  const c = val * sat, x = c * (1 - Math.abs((h / 60) % 2 - 1)), m = val - c;
+  let r, g, b;
+  if (h < 60) [r, g, b] = [c, x, 0]; else if (h < 120) [r, g, b] = [x, c, 0];
+  else if (h < 180) [r, g, b] = [0, c, x]; else if (h < 240) [r, g, b] = [0, x, c];
+  else if (h < 300) [r, g, b] = [x, 0, c]; else [r, g, b] = [c, 0, x];
+  return [Math.round((r + m) * 255), Math.round((g + m) * 255), Math.round((b + m) * 255)];
+}
+let vizTimer = null, vizHue = 200, vizPreset = 'equalizer';
+const vizBands = { bass: 0.3, mid: 0.3, treble: 0.3 };
+function vizTick() {
+  // a plausible musical envelope: slow bass swing, busier mids, treble on accents
+  const t = performance.now() / 1000;
+  vizBands.bass = 0.35 + 0.55 * Math.abs(Math.sin(t * 1.7));
+  vizBands.mid = 0.25 + 0.6 * Math.abs(Math.sin(t * 3.1 + 1));
+  vizBands.treble = 0.15 + 0.75 * Math.abs(Math.sin(t * 5.3 + 2));
+  const hues = PRESET_HUES[vizPreset];
+  leds.forEach((el, i) => {
+    const zone = i < 4 ? 0 : (i < 8 ? 1 : 2);
+    const band = zone === 0 ? vizBands.bass : (zone === 1 ? vizBands.mid : vizBands.treble);
+    let col;
+    if (vizPreset === 'mono') col = [255, 255, 255];
+    else if (vizPreset === 'rainbow') col = hsv(vizHue + i * 30);
+    else col = hsv((hues ? hues[zone] : 200) + (vizHue - 200));
+    const k = (0.18 + 0.82 * band) * (0.75 + 0.25 * (i % 2));
+    el.style.background = `rgb(${col[0]*k|0},${col[1]*k|0},${col[2]*k|0})`;
+    el.style.boxShadow = `0 0 ${8 + 18 * band}px rgba(${col[0]},${col[1]},${col[2]},.75)`;
+  });
+}
+function startViz(preset) {
+  if (preset) vizPreset = preset;
+  if (vizTimer) clearInterval(vizTimer);
+  vizTimer = setInterval(vizTick, 110);
+}
+function stopViz() {
+  if (vizTimer) clearInterval(vizTimer);
+  vizTimer = null;
+  setRing(OFF, 0);
+}
 
 /* music bars */
 const bars = $('#bars');
@@ -276,11 +342,19 @@ async function run() {
   await sleep(300);
   $('#music').classList.add('on');
   startBars();
-  await caption("audio-only extraction — there is no ad break in the stream to skip", 2600);
-  await sleep(1800);
+  startViz('equalizer');
+  await caption("three bands on the 12 LEDs — bass, mids, treble from an FFT of the audio", 2400);
+  await sleep(2200);
+  startViz('ocean');
+  await caption("presets: ocean", 1500);
+  await sleep(1600);
+  startViz('rainbow');
+  await caption("or rainbow, or a hue you pick on the wheel", 1700);
+  await sleep(1500);
 
   await press();
   stopBars();
+  stopViz();
   $('#music').classList.remove('on');
   await caption("one press: music stops, both audio planes flushed, the mic opens", 2400);
   await sleep(400);

@@ -20,8 +20,8 @@ the answers are useful rather than a parlor trick.
 | 1 | 0–6 s | The Dot, finger pressing the button, ring turning cyan | *(no VO — just the cue tone and the ring)* |
 | 2 | 6–14 s | Dot answers out loud | *"What is the tallest mountain? … Eight thousand eight hundred and forty-nine metres, measured jointly by Nepal and China in 2020."* |
 | 3 | 14–18 s | Cut to the dashboard, cursor over the transcript | *"No API key. It read Google's own answer out of a browser I was already signed into."* |
-| 4 | 18–30 s | Press button again: "play some mozart" → music starts, keep the mic audio | *"Same button stops the song, listens, and picks up where it left off."* |
-| 5 | 30–42 s | Dashboard: drag the bass slider, then *Recently played* | *"Three-band EQ, volume, and everything it played — because it's my speaker, not a subscription."* |
+| 4 | 18–30 s | Press button again: "play some mozart" → music starts, ring becomes a three-band visualiser, then shifts through **ocean** and **rainbow** | *"Same button stops the song, listens, and picks up where it left off. The ring is reading the audio — bass, mids, treble, eight frames a second."* |
+| 5 | 30–42 s | Dashboard: drag the bass slider, then the lighting card (hue wheel + preset chips), then *Recently played* | *"Three-band EQ, volume, and everything it played — because it's my speaker, not a subscription."* |
 | 6 | 42–52 s | Show the Dot from underneath / a still of the board | *"It's a 2016 Echo Dot. 512 MB of RAM. Amazon stopped giving it features years ago."* |
 | 7 | 52–62 s | Dot answering something house-specific ("what time is it", "how's the build going") | *"Everything local except the question itself: speech to text, the voice, the music pipeline."* |
 | 8 | 62–75 s | Static end card: repo name + one line + your handle | *"The controller is open source. It's not a jailbreak — I didn't write the unlock, and I don't ship it. I wrote the half that makes the device worth owning."* |
