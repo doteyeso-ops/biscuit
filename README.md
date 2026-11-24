@@ -34,6 +34,9 @@ Dot talks to. It is not a jailbreak and it is not a firmware image.
 - **The ring dances.** While music plays, the 12 LEDs become a three-band
   visualiser — bass on 0–3, mids on 4–7, treble on 8–11 — driven by an FFT of the
   audio actually going to the speaker, about 8 frames a second.
+![The dashboard: now playing, volume and behaviour, equaliser with the ring
+legend, lighting with a hue wheel and presets, and recently played.](docs/ui.png)
+
 - **Dashboard** at `http://127.0.0.1:8767/ui` — now playing, search and play,
   volume, 3-band EQ, recently played, a **lighting panel** (visualiser on/off, a
   hue wheel, brightness, and seven presets: equalizer, ocean, sunset, forest,

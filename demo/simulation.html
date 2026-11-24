@@ -95,6 +95,9 @@
     background:conic-gradient(from 0deg,#f33,#ff3,#3f3,#3ff,#33f,#f3f,#f33)}
   .wheel:after{content:"";position:absolute;inset:20px;border-radius:50%;background:var(--panel)}
   .chips{display:flex;flex-wrap:wrap;gap:6px}
+  .legend{display:grid;gap:5px;margin-top:12px;font-size:11.5px;color:var(--dim)}
+  .legend i{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:7px;
+    vertical-align:middle;border:1px solid #000}
   .chip{background:#1b2330;color:#cfd9e8;border:1px solid #26313f;border-radius:999px;
     padding:5px 10px;font-size:12px}
   .chip.on{background:var(--cyan);color:#06202e;border-color:var(--cyan);font-weight:600}
@@ -161,6 +164,11 @@
             <span class="chip on">equalizer</span><span class="chip">ocean</span>
             <span class="chip">sunset</span><span class="chip">rainbow</span>
           </div>
+        </div>
+        <div class="legend">
+          <span><i style="background:#37d5ff"></i>listening — talk now</span>
+          <span><i style="background:#0a5cff"></i>thinking</span>
+          <span><i style="background:#41e08f"></i>speaking — press to interrupt</span>
         </div>
       </div>
     </div>
