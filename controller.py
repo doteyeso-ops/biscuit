@@ -201,6 +201,188 @@ async def amp_on():
 _SENT = re.compile(r"(?<=[.!?])\s+")
 
 MUSIC = {"task": None, "stop": None, "title": "", "query": ""}
+
+# ---------------------------------------------------------------------------
+# Ring visualiser
+#
+# The ring is 12 LEDs and the music arrives as 42.67 ms mono periods, so the
+# cheapest honest visualisation is a three-band meter: bass on 0-3, mids on 4-7,
+# treble on 8-11, all scaled by the period's level. Sent at ~7 Hz, not per
+# period: the control plane also carries button events, and flooding it starves
+# nothing but makes the ring look nervous.
+# ---------------------------------------------------------------------------
+VIS = {"on": False, "frame": 0, "peak": 1.0, "sent": 0,
+       "pk": {"bass": 0.2, "mid": 0.2, "treble": 0.2}}
+
+# Lighting: presets decide the shape, `hue` rotates the whole palette so the
+# wheel in the dashboard and the preset chips are the same mechanism.
+LIGHT = {"enabled": True, "preset": "equalizer", "hue": 200, "brightness": 1.0}
+
+PRESETS = {
+    # name: (mode, base hues as degrees for the three bands)
+    "equalizer": ("zones", (28, 135, 192)),
+    "mono":      ("zones", (0, 0, 0)),
+    "ocean":     ("zones", (196, 176, 158)),
+    "sunset":    ("zones", (8, 32, 350)),
+    "forest":    ("zones", (96, 130, 160)),
+    "rainbow":   ("rainbow", (0, 120, 240)),
+    "pulse":     ("pulse", (0, 0, 0)),
+}
+
+
+def load_lighting():
+    """Pick up the saved palette at startup so a restart keeps the look."""
+    try:
+        cfg = hdash.load_config().get("lighting") or {}
+        for k in ("enabled", "preset", "hue", "brightness"):
+            if k in cfg:
+                LIGHT[k] = cfg[k]
+        if LIGHT["preset"] not in PRESETS:
+            LIGHT["preset"] = "equalizer"
+        log(f"lighting: {LIGHT['preset']} hue {LIGHT['hue']} "
+            f"brightness {LIGHT['brightness']} enabled {LIGHT['enabled']}")
+    except Exception as e:
+        log("lighting: could not load config:", e)
+
+
+def _hsv_rgb(h, sat=1.0, val=1.0):
+    """HSV -> (r, g, b) 0-255. Small enough to inline rather than import."""
+    h = h % 360
+    c = val * sat
+    x = c * (1 - abs((h / 60.0) % 2 - 1))
+    m = val - c
+    if h < 60:    r, g, b = c, x, 0
+    elif h < 120: r, g, b = x, c, 0
+    elif h < 180: r, g, b = 0, c, x
+    elif h < 240: r, g, b = 0, x, c
+    elif h < 300: r, g, b = x, 0, c
+    else:         r, g, b = c, 0, x
+    return (int((r + m) * 255), int((g + m) * 255), int((b + m) * 255))
+
+
+def _zone_colors():
+    """Three (r,g,b) for bass/mid/treble, from the preset plus the hue wheel."""
+    mode, hues = PRESETS.get(LIGHT["preset"], PRESETS["equalizer"])
+    if LIGHT["preset"] == "mono":
+        return [(255, 255, 255)] * 3, mode
+    # The wheel rotates the palette around a fixed neutral, so preset colours stay
+    # recognisable at the default hue and shift together as the wheel turns.
+    shift = int(LIGHT["hue"]) - 200
+    if LIGHT["preset"] in ("rainbow", "pulse"):
+        base = int(LIGHT["hue"])
+        hues = (base, base + 120, base + 240)
+    return [_hsv_rgb(h + shift) for h in hues], mode
+
+
+def _band_levels(chunk):
+    """(bass, mid, treble, level) normalised 0..1 from one mono s16 period.
+
+    A real FFT split, because the cheap version could not tell 60 Hz from 1 kHz
+    (both landed in "mid"), which makes a ring that flickers rather than moves
+    with the music. numpy is used when present; the arithmetic fallback keeps
+    the visualiser alive on a machine without it.
+    """
+    usable = len(chunk) // 2 * 2
+    if usable < 256:
+        return 0.0, 0.0, 0.0, 0.0
+    try:
+        import numpy as np
+        a = np.frombuffer(chunk[:usable], dtype="<i2").astype(np.float32) / 32768.0
+        level = float(np.abs(a).mean())
+        spec = np.abs(np.fft.rfft(a * np.hanning(len(a)))) / len(a)
+        freqs = np.fft.rfftfreq(len(a), 1.0 / 48000.0)
+        bands = []
+        for lo, hi in ((20, 250), (250, 4000), (4000, 16000)):
+            sel = spec[(freqs >= lo) & (freqs < hi)]
+            bands.append(float(np.sqrt((sel ** 2).mean())) if sel.size else 0.0)
+        bass, mid, treb = bands
+        # scale so a loud period reaches ~1.0 in its band
+        return (min(1.0, bass * 22), min(1.0, mid * 30),
+                min(1.0, treb * 55), min(1.0, level * 3.6))
+    except Exception:
+        import array
+        a = array.array("h")
+        a.frombytes(chunk[:usable])
+        n = len(a)
+        bass = sum(abs(a[i]) for i in range(0, n, 8)) / max(1, len(range(0, n, 8)))
+        mid = sum(abs(a[i]) for i in range(0, n, 2)) / max(1, len(range(0, n, 2)))
+        treb = sum(abs(a[i] - a[i - 1]) for i in range(1, n, 2)) / max(1, (n - 1) // 2)
+        level = sum(abs(x) for x in a) / n
+        sc = 32768.0
+        return (min(1.0, bass / sc * 2.2), min(1.0, mid / sc * 3.2),
+                min(1.0, treb / sc * 1.6), min(1.0, level / sc * 3.0))
+
+
+async def _visualise(chunk):
+    """Push one ring frame per ~140 ms of audio."""
+    if not VIS["on"] or not LIGHT["enabled"] or DEVICE_WS is None:
+        return
+    VIS["frame"] += 1
+    if VIS["frame"] % 3:          # 42.67 ms * 3 ~= 128 ms
+        return
+    bass, mid, treb, level = _band_levels(chunk)
+    VIS["peak"] = max(VIS["peak"] * 0.985, level, 0.08)   # slow decay
+    norm = min(1.0, level / VIS["peak"])
+    # each band against its own rolling peak, so quiet bands still move
+    for name, val in (("bass", bass), ("mid", mid), ("treble", treb)):
+        VIS["pk"][name] = max(VIS["pk"][name] * 0.96, val, 0.05)
+    colors, mode = _zone_colors()
+    bright = max(0.0, min(1.0, float(LIGHT["brightness"])))
+    if mode == "pulse":
+        # one colour, whole ring breathing with the loudest band
+        lvl = max(bass, mid, treb)
+        k = (0.25 + 0.75 * min(1.0, lvl / (VIS["pk"]["mid"] or 1))) * bright
+        r, g, b = colors[0]
+        leds = [{"id": i, "r": int(r * k), "g": int(g * k), "b": int(b * k)}
+                for i in range(12)]
+        try:
+            await DEVICE_WS.send_str(json.dumps(
+                {"type": "leds", "leds": leds, "listening": False}))
+            VIS["sent"] += 1
+            if VIS["sent"] == 1:
+                log("ring: first visualiser frame sent")
+        except Exception:
+            VIS["on"] = False
+        return
+    if mode == "rainbow":
+        # hue rotates around the ring, brightness follows the band under it
+        leds = []
+        for i in range(12):
+            band = bass if i < 4 else (mid if i < 8 else treb)
+            name = "bass" if i < 4 else ("mid" if i < 8 else "treble")
+            amt = min(1.0, band / (VIS["pk"][name] or 1))
+            r, g, b = _hsv_rgb(int(LIGHT["hue"]) + i * 30)
+            k = (0.2 + 0.8 * amt) * bright
+            leds.append({"id": i, "r": int(r * k), "g": int(g * k), "b": int(b * k)})
+        try:
+            await DEVICE_WS.send_str(json.dumps(
+                {"type": "leds", "leds": leds, "listening": False}))
+            VIS["sent"] += 1
+            if VIS["sent"] == 1:
+                log("ring: first visualiser frame sent")
+        except Exception:
+            VIS["on"] = False
+        return
+    zones = ((0, 3, bass, "bass", colors[0]),
+             (4, 7, mid, "mid", colors[1]),
+             (8, 11, treb, "treble", colors[2]))
+    leds = []
+    for lo, hi, band, name, (r, g, b) in zones:
+        amt = max(0.0, min(1.0, band / VIS["pk"][name] if VIS["pk"][name] else 0))
+        amt = (amt * 0.8 + norm * 0.2)
+        for i in range(lo, hi + 1):
+            # a little variation inside the zone so it reads as motion
+            k = amt * (0.65 + 0.35 * ((i % 2) ^ 1)) * bright
+            leds.append({"id": i, "r": int(r * k), "g": int(g * k), "b": int(b * k)})
+    try:
+        await DEVICE_WS.send_str(json.dumps(
+            {"type": "leds", "leds": leds, "listening": False}))
+        VIS["sent"] += 1
+        if VIS["sent"] == 1:
+            log("ring: first visualiser frame sent")
+    except Exception:
+        VIS["on"] = False
+
 VOLUME = {"level": 60}
 
 
@@ -232,6 +414,9 @@ async def play_music(query, ws=None, gain_db=None):
         raise
     log(f"music: ffmpeg pid={getattr(proc, 'pid', '?')}")
     stop = MUSIC["stop"] = asyncio.Event()
+    VIS.update({"on": True, "frame": 0, "peak": 1.0,
+                "pk": {"bass": 0.2, "mid": 0.2, "treble": 0.2}})
+    log("ring: visualiser on")
     clock = {"t": time.monotonic()}
     frames = 0
     try:
@@ -250,6 +435,7 @@ async def play_music(query, ws=None, gain_db=None):
                 log("music send failed:", e)
                 break
             frames += 1
+            await _visualise(chunk)
             slack = clock["t"] - time.monotonic()
             if slack > 0:
                 await asyncio.sleep(slack)
@@ -257,10 +443,16 @@ async def play_music(query, ws=None, gain_db=None):
                 clock["t"] = time.monotonic()
         await ws.send_bytes(b"\x05")
     finally:
+        VIS["on"] = False
+        log(f"ring: visualiser sent {VIS['sent']} frames")
+        ring_send("off")
         try:
             proc.kill()
-            await proc.wait()
         except Exception:
+            pass
+        try:
+            await proc.wait()
+        except (Exception, asyncio.CancelledError):
             pass
     log(f"music stopped after {frames} frames")
 
@@ -654,6 +846,10 @@ async def voice_loop(max_turns=None, follow_up_wait=9.0):
             reply = await asyncio.to_thread(
                 _hermes_ask, convo.SPOKEN_INSTRUCTION + text if HAVE_APP else text)
         if not reply.strip():
+            reply = _local_answer(text)
+            if reply:
+                log(f"turn {n} local answer: {reply[:60]}")
+        if not reply.strip():
             log(f"turn {n}: brain returned nothing")
             await speak("Sorry, I'm a bit busy. Give me a second and ask again.")
             break
@@ -760,6 +956,61 @@ def _whisper(text_pcm):
         return text
 
 
+def _local_answer(text):
+    """Answers that need nothing: no key, no browser, no model, no network.
+
+    A machine with none of the optional pieces still gets a useful speaker --
+    which is the difference between "you need my exact setup" and "install it".
+    """
+    import datetime
+    low = (text or "").lower()
+    now = datetime.datetime.now()
+    if "time" in low:
+        # "1:39 PM" reads correctly through TTS; "1:39 p m" does not.
+        return now.strftime("%I:%M %p").lstrip("0")
+    if "date" in low or "what day" in low or "today" in low:
+        return now.strftime("%A, %B ") + str(now.day)
+    if "what can you do" in low or "help" == low.strip():
+        return ("I can play music, tell you the time and date, and answer questions "
+                "when a brain is connected.")
+    return ""
+
+
+PERSONA = (
+    "You are the voice assistant for a small household speaker. Answer the way a "
+    "person would say it out loud: at most two short sentences, no markdown, no "
+    "lists, no code, no URLs read aloud, no file paths. If you do not know, say so "
+    "plainly."
+)
+
+
+def _llm_ask(text):
+    """Any OpenAI-compatible endpoint: OpenAI, Groq, vLLM, LM Studio, llama.cpp,
+    Ollama's /v1, or a box in the cupboard. This is the lane that makes the
+    project agent-agnostic -- nothing here needs Hermes to be installed."""
+    import urllib.request
+    base = os.environ["DOT_LLM_URL"].rstrip("/")
+    if not base.endswith("/chat/completions"):
+        base += "/chat/completions"
+    body = {
+        "model": os.environ.get("DOT_LLM_MODEL", "gpt-4o-mini"),
+        "messages": [{"role": "system", "content": PERSONA},
+                     {"role": "user", "content": text}],
+        "max_tokens": int(os.environ.get("DOT_LLM_MAX_TOKENS", "220")),
+        "temperature": 0.3,
+    }
+    key = os.environ.get("DOT_LLM_KEY", "")
+    headers = {"Content-Type": "application/json"}
+    if key:
+        headers["Authorization"] = f"Bearer {key}"
+    req = urllib.request.Request(base, data=json.dumps(body).encode(),
+                                 headers=headers)
+    with urllib.request.urlopen(req, timeout=float(
+            os.environ.get("DOT_LLM_TIMEOUT", "25"))) as r:
+        j = json.loads(r.read().decode())
+    return (j["choices"][0]["message"].get("content") or "").strip()
+
+
 def _hermes_ask(text):
     """One turn against the Dot's own named session.
 
@@ -767,6 +1018,13 @@ def _hermes_ask(text):
     stored on one turn was recalled on the next, same session_id) and, with -Q,
     prints only the answer plus a session_id line we strip.
     """
+    if os.environ.get("DOT_LLM_URL"):
+        try:
+            out = _llm_ask(text)
+            log(f"brain: llm endpoint answered ({len(out)} chars)")
+            return out
+        except Exception as e:
+            log("brain: llm endpoint failed, falling back to the CLI:", e)
     cmd = ["hermes", "chat", "-q", text,
            "--continue", VOICE_SESSION, "--create-if-missing", "-Q"]
     out = ""
@@ -1084,6 +1342,7 @@ async def any_route(request):
             "followups": int(cfg.get("followups", 0)),
             "always_on": bool(cfg.get("always_on", False)),
             "history": hdash.history(30) if HAVE_DASH else [],
+            "lighting": LIGHT,
         })
 
     if request.method == "POST" and request.path == "/api/play":
@@ -1112,6 +1371,31 @@ async def any_route(request):
         except Exception as e:
             return web.json_response({"ok": False, "error": str(e)}, status=503)
         return web.json_response({"ok": True, "volume": level})
+
+    if request.method == "GET" and request.path == "/api/lighting":
+        return web.json_response({**LIGHT, "presets": list(PRESETS)})
+
+    if request.method == "POST" and request.path == "/api/lighting":
+        body = await request.json()
+        if "enabled" in body:
+            LIGHT["enabled"] = bool(body["enabled"])
+        if "preset" in body:
+            name = str(body["preset"])
+            if name not in PRESETS:
+                return web.json_response(
+                    {"ok": False, "error": f"unknown preset {name}"}, status=400)
+            LIGHT["preset"] = name
+        if "hue" in body:
+            LIGHT["hue"] = int(body["hue"]) % 360
+        if "brightness" in body:
+            LIGHT["brightness"] = max(0.05, min(1.0, float(body["brightness"])))
+        if HAVE_DASH:
+            try:
+                hdash.save_config({"lighting": LIGHT})
+            except Exception as e:
+                log("lighting: save failed:", e)
+        log(f"lighting -> {LIGHT}")
+        return web.json_response({"ok": True, **LIGHT})
 
     if request.method == "POST" and request.path == "/api/eq":
         body = await request.json()
@@ -1186,6 +1470,7 @@ async def any_route(request):
             clock["t"] += 2048 / 48000
             await ws.send_bytes(b"" + chunk)
             frames += 1
+            await _visualise(chunk)
             slack = clock["t"] - time.monotonic()
             if slack > 0:
                 await asyncio.sleep(slack)
@@ -1272,6 +1557,7 @@ async def main():
     # searches) runs through it, and a starved pool silently stalls playback.
     from concurrent.futures import ThreadPoolExecutor
     asyncio.get_event_loop().set_default_executor(ThreadPoolExecutor(max_workers=16))
+    load_lighting()
     asyncio.create_task(asyncio.to_thread(_warm))
 
     info = ServiceInfo(
@@ -1286,9 +1572,6 @@ async def main():
     try:
         await azc.async_register_service(info, allow_name_change=True)
     except Exception as e:
-        # A second controller (or a stale registration) answers to the same
-        # name. The device also holds a static endpoint, so mDNS is a
-        # convenience — never let it take the process down.
         log("mDNS registration failed, continuing with static endpoints:", e)
     log("mDNS advertised; waiting for the Echo")
     asyncio.create_task(responder())

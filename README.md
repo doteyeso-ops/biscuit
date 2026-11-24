@@ -26,8 +26,13 @@ Dot talks to. It is not a jailbreak and it is not a firmware image.
   browser, then search snippets plus a model, then a full agent with tools.
 - **Music** with no ads in the stream: `yt-dlp` takes the audio-only track, so
   there is no ad break to skip in the first place.
+- **The ring dances.** While music plays, the 12 LEDs become a three-band
+  visualiser — bass on 0–3, mids on 4–7, treble on 8–11 — driven by an FFT of the
+  audio actually going to the speaker, about 8 frames a second.
 - **Dashboard** at `http://127.0.0.1:8767/ui` — now playing, search and play,
-  volume, 3-band EQ, recently played, and toggles for follow-ups and wake word.
+  volume, 3-band EQ, recently played, a **lighting panel** (visualiser on/off, a
+  hue wheel, brightness, and seven presets: equalizer, ocean, sunset, forest,
+  mono, rainbow, pulse), and toggles for follow-ups and wake word.
 - **Survives itself.** A supervisor restarts the controller if it exits, and the
   Dot redials on its own.
 
@@ -45,6 +50,42 @@ You unlock your own hardware with [firebreak](https://github.com/W1CT0R/firebrea
 you flash emOS with EchoMuse, and then this controller plugs into it. See
 [NOTICE.md](NOTICE.md) and [docs/LEGAL.md](docs/LEGAL.md) — read the legal note
 before you start.
+
+## Runs with what you already have
+
+Nothing here requires my exact setup. Every piece below is optional, and the
+controller degrades instead of failing when it is missing.
+
+| you have | what you get |
+|---|---|
+| an OpenAI-compatible endpoint (`DOT_LLM_URL`) | the agent lane: OpenAI, Groq, vLLM, LM Studio, llama.cpp server, Ollama's `/v1` |
+| a local `hermes` CLI | the agent lane with tools and household memory |
+| a browser you can start with a debug port | Google's own answer overview, no key |
+| none of the above | search snippets + a model if one is configured, otherwise time, date and music |
+| nothing at all | time, date, music, and "I can't answer that yet" |
+
+That last row is deliberate: a machine with no keys, no browser and no model
+still gets a working speaker rather than a stack trace.
+
+## If your setup is messy
+
+Most of the friction in this project came from assumptions, not code. So:
+
+- **No API keys?** `PERSONA` and `_local_answer` need none. Music and the clock
+  work offline.
+- **Different model?** Set `DOT_LLM_URL` to anything OpenAI-shaped. The persona
+  prompt is one string at the top of `controller.py`.
+- **Already running Home Assistant?** This is not an HA add-on; it is a second
+  controller speaking the same device protocol. Run one or the other against the
+  Dot, not both at once.
+- **No Brave?** The Google lane is skipped, the snippet lane answers instead.
+  `DOT_DISABLE_GOOGLE=1` does the same thing on purpose.
+- **Not a Dot 2?** Only the Dot 2 on emOS has been tested. Other boards announce
+  a different capability list; expect to adapt the protocol calls.
+- **Two controllers on one machine?** Allowed — set `DOT_PORT`. mDNS may refuse
+  the second name and the controller logs it and carries on.
+- **Windows, macOS, Linux?** The controller is plain asyncio; the only
+  OS-specific part is the `ffmpeg` path, which is an env var.
 
 ## Install
 
@@ -77,6 +118,11 @@ Everything comes from the environment; nothing secret is stored in the repo.
 | `VOICE_FOLLOWUPS` | `0` | extra turns after one press |
 | `MUSIC_GAIN_DB` | `0` | pre-guard gain for music |
 | `ALWAYS_ON` | `0` | wake-word listening instead of the button |
+| `DOT_LLM_URL` | unset | OpenAI-compatible endpoint for the agent lane |
+| `DOT_LLM_KEY` | unset | bearer token for that endpoint, if it wants one |
+| `DOT_LLM_MODEL` | `gpt-4o-mini` | model name sent to it |
+| `DOT_LLM_TIMEOUT` | `25` | seconds before the lane is abandoned |
+| `DOT_DISABLE_GOOGLE` | unset | set to `1` to skip the browser lane entirely |
 
 The dashboard writes `dot_config.json` (EQ, toggles) and `music_history.json`
 beside the controller. Both are gitignored.
