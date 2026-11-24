@@ -237,6 +237,24 @@ PRESETS = {
 }
 
 
+SETTINGS = {"title": "Biscuit", "llm_url": "", "llm_model": "", "llm_key": "",
+            "google": True, "voice": ""}
+
+
+def load_settings():
+    """Settings the user can change from the dashboard, not just at launch."""
+    global SETTINGS
+    if not HAVE_DASH:
+        return
+    try:
+        cfg = hdash.load_config()
+        st = cfg.get("settings") or {}
+        SETTINGS.update({k: v for k, v in st.items() if v not in (None, "")})
+        log("settings:", {k: ("***" if k == "llm_key" and v else v) for k, v in SETTINGS.items()})
+    except Exception as e:
+        log("settings load failed:", e)
+
+
 def load_lighting():
     """Pick up the saved palette at startup so a restart keeps the look."""
     try:
@@ -927,7 +945,7 @@ async def voice_loop(max_turns=None, follow_up_wait=9.0):
             await speak("Stopped.")
             break
         if not needs_agent(text):
-            if HAVE_WEB and not os.environ.get("DOT_DISABLE_GOOGLE"):
+            if HAVE_WEB and SETTINGS.get("google", True) and not os.environ.get("DOT_DISABLE_GOOGLE"):
                 try:
                     ga, kind = await hweb.google_answer(text)
                     log(f"turn {n} google lane ({kind}): {ga[:110]}")
@@ -1114,11 +1132,12 @@ def _llm_ask(text):
     Ollama's /v1, or a box in the cupboard. This is the lane that makes the
     project agent-agnostic -- nothing here needs Hermes to be installed."""
     import urllib.request
-    base = os.environ["DOT_LLM_URL"].rstrip("/")
+    url = SETTINGS.get("llm_url") or os.environ.get("DOT_LLM_URL", "")
+    base = url.rstrip("/")
     if not base.endswith("/chat/completions"):
         base += "/chat/completions"
     body = {
-        "model": os.environ.get("DOT_LLM_MODEL", "gpt-4o-mini"),
+        "model": SETTINGS.get("llm_model") or os.environ.get("DOT_LLM_MODEL", "gpt-4o-mini"),
         "messages": [{"role": "system", "content": PERSONA},
                      {"role": "user", "content": text}],
         "max_tokens": int(os.environ.get("DOT_LLM_MAX_TOKENS", "220")),
@@ -1143,7 +1162,7 @@ def _hermes_ask(text):
     stored on one turn was recalled on the next, same session_id) and, with -Q,
     prints only the answer plus a session_id line we strip.
     """
-    if os.environ.get("DOT_LLM_URL"):
+    if SETTINGS.get("llm_url") or os.environ.get("DOT_LLM_URL"):
         try:
             out = _llm_ask(text)
             log(f"brain: llm endpoint answered ({len(out)} chars)")
@@ -1465,6 +1484,8 @@ async def any_route(request):
         cfg = hdash.load_config() if HAVE_DASH else {}
         task = MUSIC.get("task")
         return web.json_response({
+            "settings": {**{k: v for k, v in SETTINGS.items() if k != "llm_key"},
+                         "has_key": bool(SETTINGS.get("llm_key"))},
             "device": DEVICE_WS is not None and not getattr(DEVICE_WS, "closed", True),
             "playing": bool(task and not task.done()),
             "now_playing": MUSIC.get("title") or "",
@@ -1503,6 +1524,29 @@ async def any_route(request):
         except Exception as e:
             return web.json_response({"ok": False, "error": str(e)}, status=503)
         return web.json_response({"ok": True, "volume": level})
+
+    if request.method == "GET" and request.path == "/api/settings":
+        safe = dict(SETTINGS)
+        safe["llm_key"] = ""          # never echo a secret back to the page
+        safe["has_key"] = bool(SETTINGS.get("llm_key"))
+        return web.json_response(safe)
+
+    if request.method == "POST" and request.path == "/api/settings":
+        body = await request.json()
+        for k in ("title", "llm_url", "llm_model", "llm_key", "voice"):
+            if k in body and isinstance(body[k], str):
+                SETTINGS[k] = body[k].strip()
+        if "google" in body:
+            SETTINGS["google"] = bool(body["google"])
+        if HAVE_DASH:
+            try:
+                hdash.save_config({"settings": SETTINGS})
+            except Exception as e:
+                log("settings save failed:", e)
+        log("settings updated:", {k: ("***" if k == "llm_key" and v else v)
+                                  for k, v in SETTINGS.items()})
+        safe = dict(SETTINGS); safe["llm_key"] = ""
+        return web.json_response({"ok": True, "settings": safe})
 
     if request.method == "GET" and request.path == "/api/lighting":
         return web.json_response({**LIGHT, "presets": list(PRESETS)})
@@ -1739,6 +1783,7 @@ async def main():
     from concurrent.futures import ThreadPoolExecutor
     asyncio.get_event_loop().set_default_executor(ThreadPoolExecutor(max_workers=16))
     load_lighting()
+    load_settings()
     asyncio.create_task(asyncio.to_thread(_warm))
 
     info = ServiceInfo(

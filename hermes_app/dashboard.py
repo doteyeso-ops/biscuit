@@ -22,6 +22,8 @@ DEFAULTS = {
     "volume": 60,
     "favourites": [],
     "lighting": {"enabled": True, "preset": "equalizer", "hue": 200, "brightness": 1.0},
+    "settings": {"title": "Biscuit", "llm_url": "", "llm_model": "", "llm_key": "",
+                 "google": True, "voice": ""},
 }
 
 
@@ -85,7 +87,7 @@ def eq_filter():
 
 
 PAGE = """<!doctype html><html><head><meta charset="utf-8">
-<title>Hermes Dot</title>
+<title>Biscuit</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
 :root{--bg:#080a0e;--panel:#10141b;--line:#1e2632;--fg:#eef3fa;--dim:#7d8ba0;
@@ -143,6 +145,14 @@ input[type=range]::-webkit-slider-thumb{appearance:none;width:15px;height:15px;
 #wheel:after{content:"";position:absolute;inset:26px;border-radius:50%;background:var(--panel)}
 #wknob{position:absolute;width:14px;height:14px;border-radius:50%;background:#fff;
   border:2px solid #05070a;transform:translate(-50%,-50%);pointer-events:none;z-index:2}
+.full{grid-column:1/-1}
+.grid2{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(240px,1fr))}
+.grid2 label{display:grid;gap:6px;font-size:12px;color:var(--dim);
+  text-transform:uppercase;letter-spacing:.1em}
+.grid2 input{background:#0a0e13;border:1px solid #222c39;color:var(--fg);
+  border-radius:9px;padding:10px 12px;font-size:14px;letter-spacing:0}
+.grid2 label.tgl{display:flex;align-items:center;justify-content:space-between;
+  text-transform:uppercase}
 .legend{display:grid;gap:7px;margin-top:8px;font-size:12.5px;color:var(--dim)}
 .legend i{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:8px;
   vertical-align:middle;border:1px solid #000}
@@ -151,7 +161,7 @@ input[type=range]::-webkit-slider-thumb{appearance:none;width:15px;height:15px;
   padding:6px 12px;font-size:12px;cursor:pointer}
 .chip.on{background:var(--cyan);color:#06202e;border-color:var(--cyan);font-weight:600}
 </style></head><body>
-<header><h1>Hermes Dot</h1><span id="dev" class="pill">connecting…</span><span id="mode" class="pill">—</span></header>
+<header><h1 id="brand">Biscuit</h1><span id="dev" class="pill">connecting…</span><span id="mode" class="pill">—</span></header>
 <main>
   <section>
     <h2>Now playing</h2>
@@ -169,7 +179,7 @@ input[type=range]::-webkit-slider-thumb{appearance:none;width:15px;height:15px;
     <div class="row"><input id="vol" type="range" min="0" max="100" oninput="setVol(this.value)"><span id="volv" class="dim"></span></div>
     <h2 style="margin-top:18px">Behaviour</h2>
     <div class="toggle"><span>Follow-up turns after a press<br><span class="dim">off = one press, one answer</span></span><div id="fu" class="sw" onclick="toggle('followups')"><i></i></div></div>
-    <div class="toggle"><span>Always-on wake word<br><span class="dim">“Hermes …” without pressing</span></span><div id="ao" class="sw" onclick="toggle('always_on')"><i></i></div></div>
+    <div class="toggle"><span>Always-on wake word<br><span class="dim">“Hey …” without pressing</span></span><div id="ao" class="sw" onclick="toggle('always_on')"><i></i></div></div>
   </section>
   <section>
     <h2>Equaliser</h2>
@@ -202,6 +212,24 @@ input[type=range]::-webkit-slider-thumb{appearance:none;width:15px;height:15px;
   <section>
     <h2>Recently played</h2>
     <ul id="hist"></ul>
+  </section>
+  <section class="full">
+    <h2>Settings</h2>
+    <div class="grid2">
+      <label>Name shown here<input id="s_title" type="text" placeholder="Biscuit"></label>
+      <label>Answer voice<input id="s_voice" type="text" placeholder="default (Piper lessac)"></label>
+      <label>LLM base URL<input id="s_url" type="text" placeholder="http://127.0.0.1:1234/v1"></label>
+      <label>Model<input id="s_model" type="text" placeholder="gpt-4o-mini"></label>
+      <label>API key<input id="s_key" type="password" placeholder="leave blank to keep"></label>
+      <label class="tgl">Google answer lane
+        <span id="s_google" class="sw" onclick="this.classList.toggle('on')"><i></i></span>
+      </label>
+    </div>
+    <div class="row" style="margin-top:14px">
+      <button onclick="saveSettings()">Save settings</button>
+      <span id="saved" class="dim"></span>
+    </div>
+    <div class="dim" style="margin-top:8px">No key and no URL? It still plays music, tells the time, and answers from the Google lane.</div>
   </section>
 </main>
 <script>
@@ -256,8 +284,35 @@ function initWheel(){
   });
 }
 function toggle(k){api('/api/config',{[k]:$('#'+(k==='followups'?'fu':'ao')).classList.contains('on')?0:1});}
+function paintSettings(s){
+  if(!s) return;
+  if(s.title) document.getElementById('brand').textContent=s.title;
+  document.title=(s.title||'Biscuit');
+  document.getElementById('s_title').value=s.title||'';
+  document.getElementById('s_voice').value=s.voice||'';
+  document.getElementById('s_url').value=s.llm_url||'';
+  document.getElementById('s_model').value=s.llm_model||'';
+  document.getElementById('s_google').classList.toggle('on', !!s.google);
+}
+async function saveSettings(){
+  const body={
+    title:document.getElementById('s_title').value.trim()||'Biscuit',
+    voice:document.getElementById('s_voice').value.trim(),
+    llm_url:document.getElementById('s_url').value.trim(),
+    llm_model:document.getElementById('s_model').value.trim(),
+    google:document.getElementById('s_google').classList.contains('on')
+  };
+  const k=document.getElementById('s_key').value.trim();
+  if(k) body.llm_key=k;
+  await api('/api/settings', body);
+  document.getElementById('s_key').value='';
+  document.getElementById('saved').textContent='saved';
+  setTimeout(()=>document.getElementById('saved').textContent='',1600);
+  refresh();
+}
 async function refresh(){
   const s=await api('/api/state');
+  paintSettings(s.settings);
   $('#dev').textContent=s.device?'Dot connected':'Dot offline';
   $('#dev').className='pill '+(s.device?'on':'off');
   $('#mode').textContent=s.playing?'playing':'idle';
