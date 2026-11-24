@@ -204,7 +204,7 @@ async def amp_on():
 
 _SENT = re.compile(r"(?<=[.!?])\s+")
 
-MUSIC = {"task": None, "stop": None, "title": "", "query": ""}
+MUSIC = {"task": None, "stop": None, "title": "", "query": "", "gen": 0}
 TURN_TASK = {"task": None}
 UI_TOKEN = os.environ.get("DOT_UI_TOKEN", "").strip()
 
@@ -392,7 +392,7 @@ async def _visualise(chunk):
 VOLUME = {"level": 60}
 
 
-async def play_music(query, ws=None, gain_db=None):
+async def play_music(query, ws=None, gain_db=None, stale=None):
     """Stream a song through the Dot. Audio-only extraction, so there is no ad
     break in the stream to skip."""
     import music as hmu
@@ -405,6 +405,9 @@ async def play_music(query, ws=None, gain_db=None):
     except Exception as e:
         log("music resolve failed:", e)
         raise
+    if stale is not None and stale():
+        log(f"music: dropped stale request ({query!r}) -- it was interrupted while resolving")
+        return 0
     MUSIC["title"] = title
     MUSIC["query"] = query
     if HAVE_DASH:
@@ -428,6 +431,9 @@ async def play_music(query, ws=None, gain_db=None):
     prime = 3                     # ~128 ms up front; more than this is a level spike
     try:
         while not stop.is_set():
+            if stale is not None and stale():
+                log("music: stream abandoned (interrupted)")
+                break
             try:
                 chunk = await asyncio.wait_for(proc.stdout.read(hmu.FRAME), 12)
             except asyncio.TimeoutError:
@@ -471,6 +477,7 @@ def stop_music():
     """Silence music completely: stop the producer AND cancel the task that is
     writing frames, otherwise the old song keeps streaming into the speaker
     while the mic is open."""
+    MUSIC["gen"] += 1          # invalidate any request still resolving
     stopped = False
     if MUSIC["stop"] is not None:
         MUSIC["stop"].set()
@@ -497,9 +504,12 @@ async def start_music(query, gain_db=None):
         await asyncio.sleep(0.15)
         await cue("done")
         await asyncio.sleep(0.45)      # the chime is still buffered on the device
+    gen = MUSIC["gen"]
+
     async def guarded():
         try:
-            await play_music(query, gain_db=gain_db)
+            await play_music(query, gain_db=gain_db,
+                             stale=lambda: MUSIC["gen"] != gen)
         except asyncio.CancelledError:
             pass
         except Exception as e:
@@ -739,12 +749,14 @@ async def bounded_turn(max_wait=15.0):
         for attempt in range(1, 4):
             TURN["end"] = None
             ev.clear()
-            if attempt == 1:
-                try:
-                    await ctl({"type": "mic_stop"})
-                except Exception:
-                    pass
-                await asyncio.sleep(0.15)
+            # Always release first. The device keeps the mic locked between
+            # turns; asking for it while it is still held comes back with a
+            # three-byte stub instead of audio.
+            try:
+                await ctl({"type": "mic_stop"})
+            except Exception:
+                pass
+            await asyncio.sleep(0.15 if attempt == 1 else 0.45)
             await ctl({"type": "mic_start", "lock_mic": True})
             log(f"mic_start lock_mic=true (attempt {attempt})")
             # The device primes the mic slowly (~1.5-2 s before the first
@@ -758,9 +770,16 @@ async def bounded_turn(max_wait=15.0):
                     break
                 except asyncio.TimeoutError:
                     pass
-            if len(TURN["buf"]):
+            # A few bytes is not audio: the device answers mic_start with a
+            # short stub when the mic is still held. Treat that as "did not
+            # open" and try again rather than transcribing three bytes.
+            if len(TURN["buf"]) >= 2048:
                 break
-            log(f"attempt {attempt}: mic opened but silence")
+            if len(TURN["buf"]):
+                log(f"attempt {attempt}: mic returned a stub ({len(TURN['buf'])} bytes)")
+                TURN["buf"].clear()
+            else:
+                log(f"attempt {attempt}: mic opened but silence")
 
         started = time.monotonic()
         last_len, last_change = 0, time.monotonic()
@@ -842,6 +861,9 @@ async def voice_loop(max_turns=None, follow_up_wait=9.0):
             # saturates -- "Playing X" over the intro is audible clipping. The
             # chime in start_music is the acknowledgement instead.
             await start_music(want)
+            break
+        if is_hallucination(low) or (len(low.split()) <= 1 and low not in _ONE_WORD_OK):
+            log(f"ignored: likely the music, not you ({heard!r})")
             break
         if is_trivial(low):
             log(f"turn {n} ignored trivial utterance: {low!r}")
@@ -929,7 +951,11 @@ async def on_press():
             await ctl({"type": "speaker_flush"})
         except Exception:
             pass
-        await asyncio.sleep(0.25)
+        # The flush stops the producer, not what the device has already queued:
+        # several seconds of the song are still in its buffer. Opening the mic
+        # immediately records the tail of the track, which Whisper turns into a
+        # confident sentence ("Okay, I should not do that.") and we answer it.
+        await asyncio.sleep(0.9)
     log("press: mic live -> listening")
     try:
         ring_send("listening")
