@@ -40,7 +40,7 @@ Inc. This project is **not affiliated with, endorsed by, or sponsored by
 Amazon**. The names are used only descriptively, to say which piece of hardware
 the software runs on — nominative use — and never in the project's own name, its
 logo, its domain or its package identifier. The repository is called
-`biscuit-voice` (the device's internal codename), not "Echo anything".
+`biscuit` (the device's internal codename), not "Echo anything".
 
 If you fork this and rename it, keep that rule: do not put an Amazon mark in the
 name or the branding. Saying "works with a rooted Echo Dot 2" in prose is fine;
