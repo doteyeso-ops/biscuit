@@ -51,7 +51,7 @@ async def ctl(obj):
         raise RuntimeError("no control plane")
     await DEVICE_WS.send_str(json.dumps(obj))
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "hermes_app"))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "app"))
 try:
     import tts as hts
     import ring as hring

@@ -81,13 +81,13 @@ Three processes, one protocol, and a rule about who is allowed to do what.
 | file | what it is |
 |---|---|
 | `hermes_controller2.py` | the controller: protocol, router, TTS streaming, music, dashboard routes |
-| `hermes_app/dashboard.py` | settings + history + the `/ui` page |
-| `hermes_app/music.py` | yt-dlp resolve, ffmpeg decode, exact reads |
-| `hermes_app/quick.py` | snippet lane (DDG + a provider), with a bounded search |
-| `hermes_app/webanswer.py` | Google AI Overview over CDP |
-| `hermes_app/convo.py` | answer shaping for speech |
-| `hermes_app/tts.py` | Piper with a warm daemon, SAPI fallback |
-| `hermes_app/ring.py`, `voice.py` | LED states, wake/VAD helpers |
+| `app/dashboard.py` | settings + history + the `/ui` page |
+| `app/music.py` | yt-dlp resolve, ffmpeg decode, exact reads |
+| `app/quick.py` | snippet lane (DDG + a provider), with a bounded search |
+| `app/webanswer.py` | Google AI Overview over CDP |
+| `app/convo.py` | answer shaping for speech |
+| `app/tts.py` | Piper with a warm daemon, SAPI fallback |
+| `app/ring.py`, `voice.py` | LED states, wake/VAD helpers |
 | `supervise.py` | restarts the controller when it exits |
 
 ## Known limits

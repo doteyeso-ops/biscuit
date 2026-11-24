@@ -1,0 +1,50 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # Deliberately the light stack only: the controller is written to start
+      # without the speech models, so CI proves that claim instead of taking it
+      # on trust. The full install is tested by the person with the hardware.
+      - name: Install the light stack
+        run: pip install aiohttp zeroconf numpy
+
+      - name: Byte-compile everything
+        run: python -m compileall -q controller.py app
+
+      - name: Controller starts in simulate mode
+        run: |
+          DOT_PORT=8799 DOT_SIMULATE=1 python controller.py > sim.log 2>&1 &
+          for i in $(seq 1 40); do
+            sleep 1
+            if curl -sf http://127.0.0.1:8799/api/state > state.json; then break; fi
+          done
+          cat state.json || true
+          grep -q '"device": true' state.json
+
+      - name: Dashboard is served and gated
+        run: |
+          curl -sf http://127.0.0.1:8799/ui | grep -q 'id="brand"'
+          DOT_PORT=8798 DOT_SIMULATE=1 DOT_UI_TOKEN=ci python controller.py > sim2.log 2>&1 &
+          for i in $(seq 1 40); do
+            sleep 1
+            if curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8798/api/state | grep -q 401; then
+              echo "token gate works"; exit 0
+            fi
+          done
+          echo "token gate did not engage"; exit 1
+
+      - name: Show the log on failure
+        if: failure()
+        run: cat sim.log sim2.log 2>/dev/null || true

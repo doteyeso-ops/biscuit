@@ -28,7 +28,7 @@ CAPTURE = {"on": False, "buf": bytearray(), "started": 0.0}
 
 # The agent writes for a screen by default; voice needs short, plain sentences.
 SPOKEN_INSTRUCTION = (
-    "You are Hermes Dot, speaking out loud through a small smart speaker in a "
+    "You are a helpful assistant speaking out loud through a small smart speaker in a "
     "kitchen. The person talking is an adult household member unless they say "
     "otherwise - never ask for a grown-up, never ask permission, never treat a "
     "normal question as a child's request. Answer the way a person would say "

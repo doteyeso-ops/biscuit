@@ -16,7 +16,7 @@ import urllib.request
 
 GEMINI_MODEL = os.environ.get("QUICK_GEMINI", "gemini-3-flash-preview")
 OPENROUTER_MODEL = os.environ.get("QUICK_MODEL", "google/gemma-4-31b-it:free")
-_ENV = os.environ.get("DOT_ENV_FILE", "")
+_ENV = os.path.expanduser("~/AppData/Local/hermes/.env")
 SEARCH_TIMEOUT = float(os.environ.get("QUICK_SEARCH_TIMEOUT", "2.5"))
 
 
