@@ -11,7 +11,11 @@ import os
 import shutil
 import subprocess
 
-FFMPEG = os.environ.get("FFMPEG", "ffmpeg")
+FFMPEG = shutil.which("ffmpeg") or (
+    r"C:\Users\you\AppData\Local\Microsoft\WinGet\Packages"
+    r"\Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe"
+    r"\ffmpeg-8.1.1-full_build\bin\ffmpeg.exe"
+)
 
 SR = 48000
 CHANNELS = 1          # The WIRE is mono S16LE on both planes; the device's
@@ -86,14 +90,19 @@ def _eq_chain():
 def _ffmpeg_cmd(url, gain_db=None):
     cmd = [FFMPEG, "-nostdin", "-loglevel", "error", "-i", url, "-vn"]
     g = GAIN_DB if gain_db is None else gain_db
-    af = []
+    # The device's output guard resets to 0 dB at the start of every stream and
+    # only settles once it has measured the material -- measured 0.00 dB at the
+    # start of one stream against 39.07 dB at the end of the previous one. That
+    # 20-40 dB jump is the "clip that clears itself up". A half-second fade-in
+    # holds the start quiet until the guard has caught up.
+    af = ["afade=t=in:st=0:d=0.50"]
     eq = _eq_chain()
     if eq:
         af.append(eq)
     if g:
         af.append(f"volume={g}dB,alimiter=limit=0.95:level=disabled")
-    if af:
-        cmd += ["-af", ",".join(af)]
+    # always keep the fade, even with no EQ and no gain
+    cmd += ["-af", ",".join(af)]
     cmd += ["-f", "s16le", "-acodec", "pcm_s16le",
             "-ac", str(CHANNELS), "-ar", str(SR), "pipe:1"]
     return cmd
@@ -158,14 +167,19 @@ def open_ffmpeg(url, gain_db=None):
     """
     cmd = [FFMPEG, "-nostdin", "-loglevel", "error", "-i", url, "-vn"]
     g = GAIN_DB if gain_db is None else gain_db
-    af = []
+    # The device's output guard resets to 0 dB at the start of every stream and
+    # only settles once it has measured the material -- measured 0.00 dB at the
+    # start of one stream against 39.07 dB at the end of the previous one. That
+    # 20-40 dB jump is the "clip that clears itself up". A half-second fade-in
+    # holds the start quiet until the guard has caught up.
+    af = ["afade=t=in:st=0:d=0.50"]
     eq = _eq_chain()
     if eq:
         af.append(eq)
     if g:
         af.append(f"volume={g}dB,alimiter=limit=0.95:level=disabled")
-    if af:
-        cmd += ["-af", ",".join(af)]
+    # always keep the fade, even with no EQ and no gain
+    cmd += ["-af", ",".join(af)]
     cmd += ["-f", "s16le", "-acodec", "pcm_s16le",
             "-ac", str(CHANNELS), "-ar", str(SR), "pipe:1"]
     return subprocess.Popen(cmd, stdout=subprocess.PIPE,

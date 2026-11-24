@@ -64,6 +64,14 @@ Three processes, one protocol, and a rule about who is allowed to do what.
 - **Loudness is analogue.** The device's music guard is a fixed-target AGC: more
   input just gets more reduction (32 dB → 40 dB cap, output unchanged). Volume
   comes from `Ext_Amp_Gain` and `Audio Mrgrx Volume`.
+- **Never speak over the start of a song.** Voice and music are separate planes
+  and the device *sums* them, saturating rather than wrapping, so a TTS
+  confirmation over the intro is audible clipping. The chime is the
+  acknowledgement; the confirmation sentence is gone.
+- **The output guard ramps.** It reads 0 dB at the start of a stream and settles
+  around 28-39 dB once it has measured the material, so a song's first moments
+  play far hotter than its steady state -- the "clip that clears itself up". A
+  0.5 s fade-in holds the start quiet until the guard catches up.
 - **Music runs on an asyncio subprocess.** Reading ffmpeg's pipe through the
   default thread pool stalls the whole playback path when a search hangs. The
   event loop reads it directly.

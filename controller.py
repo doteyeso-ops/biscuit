@@ -420,6 +420,7 @@ async def play_music(query, ws=None, gain_db=None):
     log("ring: visualiser on")
     clock = {"t": time.monotonic()}
     frames = 0
+    prime = 3                     # ~128 ms up front; more than this is a level spike
     try:
         while not stop.is_set():
             try:
@@ -437,6 +438,9 @@ async def play_music(query, ws=None, gain_db=None):
                 break
             frames += 1
             await _visualise(chunk)
+            if frames <= prime:
+                clock["t"] = max(clock["t"], time.monotonic())
+                continue
             slack = clock["t"] - time.monotonic()
             if slack > 0:
                 await asyncio.sleep(slack)
@@ -487,6 +491,7 @@ async def start_music(query, gain_db=None):
             pass
         await asyncio.sleep(0.15)
         await cue("done")
+        await asyncio.sleep(0.45)      # the chime is still buffered on the device
     async def guarded():
         try:
             await play_music(query, gain_db=gain_db)
@@ -827,8 +832,11 @@ async def voice_loop(max_turns=None, follow_up_wait=9.0):
                 stop_music()
                 await asyncio.sleep(0.3)
             log(f"turn {n} music request: {want!r}")
+            # No spoken confirmation here on purpose: TTS lands on the voice
+            # plane, music on its own plane, and the device sums them then
+            # saturates -- "Playing X" over the intro is audible clipping. The
+            # chime in start_music is the acknowledgement instead.
             await start_music(want)
-            await speak(f"Playing {want}.")
             break
         if is_trivial(low):
             log(f"turn {n} ignored trivial utterance: {low!r}")
@@ -1510,6 +1518,9 @@ async def any_route(request):
             await ws.send_bytes(b"" + chunk)
             frames += 1
             await _visualise(chunk)
+            if frames <= prime:
+                clock["t"] = max(clock["t"], time.monotonic())
+                continue
             slack = clock["t"] - time.monotonic()
             if slack > 0:
                 await asyncio.sleep(slack)
