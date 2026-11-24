@@ -201,6 +201,7 @@ async def amp_on():
 _SENT = re.compile(r"(?<=[.!?])\s+")
 
 MUSIC = {"task": None, "stop": None, "title": "", "query": ""}
+TURN_TASK = {"task": None}
 
 # ---------------------------------------------------------------------------
 # Ring visualiser
@@ -539,9 +540,10 @@ async def speak(text, stream=True):
     ws = await live_data_ws()
     if ws is None:
         raise RuntimeError("no data plane")
-    ring_send("speaking")
+    ring_send("speaking", color=(60, 220, 130))   # green: not your turn
     clock = {"t": time.monotonic()}
     sent = 0
+    interrupted = False
     if not stream:
         sent = await _send_pcm(ws, _synth(text), clock)
     else:
@@ -571,8 +573,18 @@ async def speak(text, stream=True):
                 if clock["t"] < time.monotonic():
                     clock["t"] = time.monotonic()
                 sent += await _send_pcm(ws, pcm, clock)
+        except asyncio.CancelledError:
+            interrupted = True
+            raise
         finally:
             task.cancel()
+            try:
+                await ws.send_bytes(b"")     # end the stream even when cut
+            except Exception:
+                pass
+            ring_send("off")
+            log(f"spoke {sent} frames{' (interrupted)' if interrupted else ''}: {text[:60]}")
+        return sent
     await ws.send_bytes(b"")
     ring_send("off")
     log(f"spoke {sent} frames: {text[:80]}")
@@ -862,18 +874,39 @@ async def voice_loop(max_turns=None, follow_up_wait=9.0):
 
 
 async def on_press():
-    """The action button: exactly one turn at a time, ever."""
+    """The action button: start a turn, or interrupt the one in progress.
+
+    A press while it is speaking cancels the answer mid-sentence, flushes the
+    speaker buffer and starts listening again. Waiting for a long reply to finish
+    before you can talk is the behaviour people describe as "it won't let me
+    interrupt"."""
     global BUSY
     await asyncio.sleep(0.25)          # let mute_state land first
     if BUSY:
-        log("press ignored: a turn is already running")
-        return
+        prev = TURN_TASK.get("task")
+        log("press: interrupt requested")
+        if prev is not None and not prev.done() and prev is not asyncio.current_task():
+            prev.cancel()
+            try:
+                await prev
+            except asyncio.CancelledError:
+                pass                   # that was the old turn, not this one
+            except Exception as e:
+                log("press: old turn ended with", repr(e))
+        try:
+            await ctl({"type": "speaker_flush"})   # drop what is still buffered
+        except Exception:
+            pass
+        log("press: interrupted, listening again")
+        BUSY = False
     if MUTED:
         log("press: mic is hardware-muted -> cue 'muted', nothing recorded")
         ring_send("muted")
         await cue("muted")
         return
     BUSY = True
+    interrupted = False
+    TURN_TASK["task"] = asyncio.current_task()
     # Music first: a press means "stop that and hear me". Cancel the stream,
     # flush the speaker buffer so the tail cannot bleed into the mic, then listen.
     if stop_music():
@@ -890,13 +923,19 @@ async def on_press():
         await cue("listen")
         await asyncio.sleep(0.30)      # let the cue clear before the mic opens
         await voice_loop()
+    except asyncio.CancelledError:
+        interrupted = True
+        log("turn: cancelled (interrupted)")
+        raise
     except Exception as e:
         log("turn failed:", e)
         ring_send("error")
     finally:
         BUSY = False
+        TURN_TASK["task"] = None
         ring_send("off")
-        await cue("done")
+        if not interrupted:
+            await cue("done")
 
 # ── action button -> a real Hermes turn ───────────────────────────────────────
 BUSY = False

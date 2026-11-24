@@ -17,6 +17,11 @@ Dot talks to. It is not a jailbreak and it is not a firmware image.
 
 ## What it does
 
+- **Press to talk, press to interrupt.** The button starts a turn; pressing again
+  while it is answering cancels the reply mid-sentence, flushes the speaker buffer
+  and listens again. You never have to wait out an answer you already know is wrong.
+  The ring tells you which state you are in: **cyan = listening, blue spin =
+  thinking, green meter = speaking, off = idle.**
 - **Push to talk.** The action button opens a bounded, VAD-gated mic turn. The
   device ends the turn itself (`0x04` spoken / `0x05` no speech) with a silence
   fallback, so it never records the room indefinitely.

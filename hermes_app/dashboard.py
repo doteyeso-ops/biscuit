@@ -123,6 +123,9 @@ input[type=range]{appearance:none;height:4px;background:#2a3441;border-radius:2p
 #wheel:after{content:"";position:absolute;inset:26px;border-radius:50%;background:var(--card)}
 #wknob{position:absolute;width:14px;height:14px;border-radius:50%;background:#fff;
   border:2px solid #05070a;transform:translate(-50%,-50%);pointer-events:none;z-index:2}
+.legend{display:grid;gap:6px;margin-top:6px;font-size:12px;color:var(--dim)}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:7px;
+  vertical-align:middle;border:1px solid #000}
 .chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
 .chip{background:#222a35;color:#cfd9e8;border:1px solid #2c3644;border-radius:999px;
   padding:5px 11px;font-size:12px;cursor:pointer}
@@ -153,6 +156,13 @@ input[type=range]{appearance:none;height:4px;background:#2a3441;border-radius:2p
     <label class="eq">Mid<input id="mid" type="range" min="-12" max="12" step="1" oninput="eq()"><span id="midv"></span></label>
     <label class="eq">Treble<input id="treble" type="range" min="-12" max="12" step="1" oninput="eq()"><span id="treblev"></span></label>
     <div class="dim" style="margin-top:8px">Applies to music from the next song.</div>
+    <div class="dim" style="margin-top:14px">what the ring means</div>
+    <div class="legend">
+      <span><i style="background:#37d5ff"></i>listening — talk now</span>
+      <span><i style="background:#0a5cff"></i>thinking</span>
+      <span><i style="background:#41e08f"></i>speaking — press to interrupt</span>
+      <span><i style="background:#20252e"></i>idle</span>
+    </div>
   </section>
   <section>
     <h2>Lighting</h2>
