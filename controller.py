@@ -199,7 +199,13 @@ async def amp_on():
         'tinymix -D 0 "Ext_Speaker_Amp_Switch" On; '
         'tinymix -D 0 "PCM Playback Volume" 127 127; '
         'tinymix -D 0 "Ext_Amp_Gain" 12dB; '
-        'tinymix -D 0 "Audio Mrgrx Volume" 98304', settle=0.5)
+        'tinymix -D 0 "Audio Mrgrx Volume" 98304; '
+        # The line-out DAC feeds the speaker amp and can be left Off (headphone
+        # routing) while every upstream stage reports "playing". That is the
+        # silent-but-playing case. BOOL controls only accept numbers.
+        'tinymix -D 0 65 1 1; '     # LO DAC Playback Switch  -> On On
+        'tinymix -D 0 64 0 0',      # HP DAC Playback Switch  -> Off Off
+        settle=0.5)
 
 
 _SENT = re.compile(r"(?<=[.!?])\s+")
@@ -427,14 +433,11 @@ async def play_music(query, ws=None, gain_db=None, stale=None):
     if stale is not None and stale():
         log(f"music: dropped stale request ({query!r}) -- it was interrupted while resolving")
         return 0
-    # Flush *here*, after the resolve and after any chime, so the plane is clean
-    # immediately before the first frame rather than seconds earlier.
-    try:
-        await ctl({"type": "speaker_flush"})
-        await ctl({"type": "music_flush"})
-    except Exception:
-        pass
-    await asyncio.sleep(0.2)
+    # Do NOT flush here. Measured on the device: a speaker_flush lands, the
+    # music frames arrive, and the device never opens a music stream at all
+    # ("voice stream complete" only, no "music stream complete", no periods).
+    # The music plane is opened by the first music frame; flushing right before
+    # it leaves the plane closed and every frame is discarded silently.
     MUSIC["title"] = title
     MUSIC["query"] = query
     if HAVE_DASH:
